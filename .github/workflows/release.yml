@@ -1,0 +1,98 @@
+# A plugin is released when the published pool doesn't have `<id>@<version>.zip` for its manifest version.
+# The pool contains all relevant data. Git tags and GitHub releases are created for changelogs only.
+
+name: Release plugins
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: publish-pool
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+env:
+  # Branch holding the pool. Set the POOL_BRANCH repository variable to move it.
+  POOL_BRANCH: ${{ vars.POOL_BRANCH }}
+  # Existing Workers URL; a repository variable can override it.
+  PAGES_BASE_URL: ${{ vars.PAGES_BASE_URL || 'https://valenced-plugins.655.workers.dev' }}
+  POOL_REMOTE: https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git
+  PLAN: ${{ github.workspace }}/releases.json
+
+jobs:
+  release:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # Existing tags, so a re-run doesn't try to recreate one.
+
+      - uses: oven-sh/setup-bun@v2
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 25
+
+      - run: bun install --frozen-lockfile
+
+      - name: Lint source and workflow scripts
+        run: |
+          shellcheck .github/scripts/*.sh
+          bun run lint
+
+      - name: Check plugin types
+        run: bun run lint:types
+
+      - name: Check out the published pool
+        run: .github/scripts/checkout-pool.sh
+
+      - name: Plan releases
+        id: plan
+        run: .github/scripts/plan-releases.sh
+
+      - name: Build plugins
+        if: steps.plan.outputs.count != '0'
+        run: ./gradlew --no-daemon packageAllPlugins
+
+      - name: Publish to the pool
+        run: .github/scripts/publish-pool.sh
+
+      - name: Tag and write changelogs
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: .github/scripts/tag-releases.sh
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: plugin-repository
+          path: |
+            published/**
+            wrangler.json
+          if-no-files-found: error
+
+  deploy:
+    needs: release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      deployments: write
+    environment:
+      name: cloudflare-workers
+      url: ${{ steps.deployment.outputs.deployment-url }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: plugin-repository
+          path: .
+      - uses: cloudflare/wrangler-action@v4
+        id: deployment
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          gitHubToken: ${{ github.token }}
+          command: deploy --config wrangler.json
