@@ -1,0 +1,31 @@
+{
+  "format": 1,
+  "name": "Cookie's Plugins",
+  "description": "Community Valenced plugins maintained by Cookie.",
+  "plugins": {
+    "cookie.valate": {
+      "name": "Valate",
+      "description": "Translate on demand or automatically in chosen open channels.",
+      "author": "Cookie (https://github.com/6-5-5 \"GitHub\")",
+      "icon": "data:image/png;base64,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",
+      "channels": {
+        "latest": "1.0.0"
+      },
+      "versions": {
+        "1.0.0": {
+          "url": "https://valenced-plugins.655.workers.dev/pool/cookie.valate@1.0.0.zip",
+          "sha256": "0318dccb954a98b9d2495f86d3c733cbf5c544e3cad27ad8eb4c24c25ccfdeb1",
+          "size": 93851,
+          "dependencies": {
+            "valenced.api": {
+              "version": ">=1 <2"
+            },
+            "discord": {
+              "version": "*"
+            }
+          }
+        }
+      }
+    }
+  }
+}

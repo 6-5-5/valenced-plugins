@@ -1,0 +1,11 @@
+[
+  {
+    "name": "valate",
+    "id": "cookie.valate",
+    "version": "1.0.0",
+    "tag": "valate@1.0.0",
+    "zip": "build/dist/cookie.valate@1.0.0.zip",
+    "file": "cookie.valate@1.0.0.zip",
+    "commit": "92f7cd169f50464846df22189070c136c8ac70ac"
+  }
+]
