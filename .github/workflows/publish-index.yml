@@ -1,0 +1,71 @@
+# Regenerates `index.json` from the artifacts already in the pool and commits it if it changed.
+#
+# Use it after editing `repo.config.json` channel overrides, or after deleting an artifact to unpublish it.
+# Automated releases are done regardless by the "Release plugins" workflow. This is for manual intervention only.
+
+name: Publish repository index
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: publish-pool
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+env:
+  # Branch holding the pool. Set the POOL_BRANCH repository variable to move it.
+  POOL_BRANCH: ${{ vars.POOL_BRANCH }}
+  # Existing Workers URL; a repository variable can override it.
+  PAGES_BASE_URL: ${{ vars.PAGES_BASE_URL || 'https://valenced-plugins.655.workers.dev' }}
+  POOL_REMOTE: https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git
+
+jobs:
+  publish:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+
+      - run: bun install --frozen-lockfile
+
+      - name: Check out the published pool
+        env:
+          REQUIRE_POOL: 1 # There is nothing to regenerate from without one.
+        run: .github/scripts/checkout-pool.sh
+
+      - name: Regenerate and publish index.json
+        run: .github/scripts/regenerate-index.sh
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: plugin-repository
+          path: |
+            published/**
+            wrangler.json
+          if-no-files-found: error
+
+  deploy:
+    needs: publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      deployments: write
+    environment:
+      name: cloudflare-workers
+      url: ${{ steps.deployment.outputs.deployment-url }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: plugin-repository
+          path: .
+      - uses: cloudflare/wrangler-action@v4
+        id: deployment
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          gitHubToken: ${{ github.token }}
+          command: deploy --config wrangler.json

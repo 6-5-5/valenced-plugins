@@ -1,0 +1,19 @@
+# Gradle / Android
+.gradle/
+build/
+plugins/*/build/
+themes/*/build/
+local.properties
+.kotlin/
+
+# JS
+node_modules/
+published/
+releases.json
+releases.json.tmp
+plan.tsv
+
+# Misc
+.DS_Store
+.idea/
+*.iml

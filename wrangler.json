@@ -1,0 +1,6 @@
+{
+	"name": "valenced-plugins",
+	"compatibility_date": "2026-10-28",
+	"workers_dev": true,
+	"assets": { "directory": "./published" }
+}
