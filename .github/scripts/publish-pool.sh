@@ -25,8 +25,7 @@ if [ "$count" -gt 0 ]; then
         plugins .github gradle gradlew gradlew.bat build.gradle.kts settings.gradle.kts \
         gradle.properties package.json bun.lock tsconfig.base.json biome.json repo.config.json \
         wrangler.json README.md LICENSE THIRD_PARTY_NOTICES.md \
-        node_modules/franc-min node_modules/iso-639-3 node_modules/trigram-utils \
-        node_modules/n-gram node_modules/collapse-white-space
+        node_modules/tinyld node_modules/iso-639-3
 fi
 
 attempt_publish() {
