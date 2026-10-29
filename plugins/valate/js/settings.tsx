@@ -581,11 +581,6 @@ export default function SettingsComponent({
 										)}
 									</>
 								)}
-								{editing !== 'deepl' && (
-									<Text variant="text-sm/normal" color="text-muted">
-										Trust the server. Redirects may expose keys.
-									</Text>
-								)}
 							</>
 						)}
 						{!!error && (

@@ -1,8 +1,7 @@
 import { ActionSheetActionCreators } from '@valenced/discord/actions'
-import { patchMessages } from './actionsheet'
-import { patchChannels } from './channels'
 import { Defaults } from './config'
 import { watchIncoming } from './incoming'
+import { patchMenus } from './menus'
 import { patchRenderer } from './renderer'
 import { createService } from './service'
 import SettingsComponent from './settings'
@@ -15,7 +14,6 @@ export default plugin<{ jsonStorage: Settings }>({
 		const service = createService()
 		const renderer = patchRenderer(cleanup)
 		const getChannel = watchIncoming(jsonStorage, service, renderer, cleanup)
-		patchChannels(jsonStorage, getChannel, cleanup)
 		cleanup(
 			() => service.clear(),
 			jsonStorage.subscribe(() => {
@@ -25,14 +23,15 @@ export default plugin<{ jsonStorage: Settings }>({
 			() => ActionSheetActionCreators.hideActionSheet(SheetKey),
 		)
 		let warned = false
-		patchMessages(
+		patchMenus(
 			jsonStorage,
 			service,
+			getChannel,
 			cleanup,
 			() => {
 				if (!warned)
 					logger.warn(
-						'Valate could not add its message action on this Discord version.',
+						'Valate could not add its menu actions on this Discord version.',
 					)
 				warned = true
 			},

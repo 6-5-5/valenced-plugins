@@ -1,13 +1,19 @@
-import { francAll } from 'franc-min'
+import { detectAll } from 'tinyld'
 import { languageFamily } from './config'
 
 export function needsTranslation(sample: string, understood: string[]) {
 	if (!sample) return false
-	if ((sample.match(/\p{L}/gu)?.length ?? 0) < 40) return true
-	const [first, second] = francAll(sample, { minLength: 40 })
-	if (first[0] === 'und' || (second && first[1] - second[1] < 0.15))
-		return false
+	const [first, second] = detectAll(sample)
+	if (!first) return false
+	const confident =
+		first.accuracy >= 0.5 &&
+		(!second || first.accuracy - second.accuracy >= 0.15)
+	const multiword =
+		first.accuracy >= 0.1 &&
+		sample.split(' ').length >= 3 &&
+		(!second || first.accuracy >= 2.25 * second.accuracy)
+	if (!confident && !multiword) return false
 	return !understood.some(
-		code => languageFamily(code) === languageFamily(first[0]),
+		code => languageFamily(code) === languageFamily(first.lang),
 	)
 }

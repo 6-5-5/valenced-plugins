@@ -12,7 +12,10 @@ export interface Message {
 
 function createDisplay(refresh: (message: Message) => void) {
 	const entries = new Map<string, { message: Message; result: Translation }>()
-	const pending = new Map<string, Message>()
+	const pending = new Map<
+		string,
+		{ message: Message; controller: AbortController }
+	>()
 	const changed = new Set<string>()
 	let active = true
 	function notify(message: Message) {
@@ -26,10 +29,17 @@ function createDisplay(refresh: (message: Message) => void) {
 		}
 	}
 	function clear() {
+		for (const job of pending.values()) job.controller.abort()
 		pending.clear()
 		const messages = [...entries.values()].map(entry => entry.message)
 		entries.clear()
 		for (const message of messages) notify(message)
+	}
+	function remove(id: string) {
+		pending.get(id)?.controller.abort()
+		pending.delete(id)
+		changed.delete(id)
+		return entries.delete(id)
 	}
 	return {
 		get(message: Message) {
@@ -38,18 +48,25 @@ function createDisplay(refresh: (message: Message) => void) {
 				? entry?.result
 				: undefined
 		},
-		prepare(message: Message) {
+		prepare(message: Message, controller: AbortController) {
 			message = { ...message }
+			const job = { message, controller }
 			if (message.id) {
-				pending.set(message.id, message)
-				if (pending.size > 64) pending.delete(pending.keys().next().value!)
+				pending.get(message.id)?.controller.abort()
+				pending.set(message.id, job)
+				if (pending.size > 64) {
+					const oldest = pending.keys().next().value!
+					pending.get(oldest)!.controller.abort()
+					pending.delete(oldest)
+				}
 			}
 			return (result: Translation) => {
 				if (
 					!active ||
+					controller.signal.aborted ||
 					!message.id ||
 					!message.channel_id ||
-					pending.get(message.id) !== message
+					pending.get(message.id) !== job
 				)
 					return false
 				pending.delete(message.id)
@@ -67,16 +84,13 @@ function createDisplay(refresh: (message: Message) => void) {
 		update(message: Message) {
 			if (!message.id || typeof message.content !== 'string') return
 			const original =
-				pending.get(message.id) ?? entries.get(message.id)?.message
-			if (original && original.content !== message.content) {
-				pending.delete(message.id)
-				entries.delete(message.id)
-			}
+				pending.get(message.id)?.message ?? entries.get(message.id)?.message
+			if (original && original.content !== message.content) remove(message.id)
 		},
 		revert(message: Message) {
-			if (message.id) pending.delete(message.id)
-			if (message.id && entries.delete(message.id)) notify(message)
+			if (message.id && remove(message.id)) notify(message)
 		},
+		remove,
 		takeChanged(id?: string) {
 			return !!id && changed.delete(id)
 		},

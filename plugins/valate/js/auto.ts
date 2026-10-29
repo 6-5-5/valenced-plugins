@@ -79,12 +79,14 @@ export function createAutoTranslate(
 					config.target,
 					...(config.understoodLanguages ?? []),
 				]
-				if ((sample.match(/\p{L}/gu)?.length ?? 0) >= 40) {
-					const { needsTranslation } = await import('./detection')
-					if (!needsTranslation(sample, understood)) return
-				}
-				if (controller.signal.aborted || !eligible(message)) return
-				const apply = display.prepare(message)
+				const { needsTranslation } = await import('./detection')
+				if (
+					controller.signal.aborted ||
+					!eligible(message) ||
+					!needsTranslation(sample, understood)
+				)
+					return
+				const apply = display.prepare(message, controller)
 				const result = await service.translateWithFallback(
 					config,
 					enabledProviders(config)[0],
@@ -160,6 +162,7 @@ export function createAutoTranslate(
 			receive({ ...original, ...message })
 		},
 		remove(id: string) {
+			display.remove(id)
 			if (running?.message.id === id) {
 				running.controller.abort()
 				running = undefined

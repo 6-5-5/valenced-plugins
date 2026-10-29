@@ -106,6 +106,15 @@ export function language(code: string) {
 }
 
 const Macrolanguages: Record<string, string> = {
+	nb: 'no',
+	nob: 'no',
+	nn: 'no',
+	nno: 'no',
+	iw: 'he',
+	in: 'id',
+	ji: 'yi',
+	jw: 'jv',
+	fil: 'tl',
 	cmn: 'zh',
 	arb: 'ar',
 	pes: 'fa',
@@ -122,7 +131,7 @@ const Macrolanguages: Record<string, string> = {
 }
 
 export function languageFamily(code: string) {
-	const base = code.toLowerCase().split('-')[0]
+	const base = code.trim().toLowerCase().split('-')[0]
 	return Macrolanguages[base] ?? iso6393To1[base] ?? base
 }
 

@@ -63,14 +63,11 @@ export function protect(text: string) {
 }
 
 export function detectionSample(text: string) {
-	const sample = protect(text)
+	return protect(text)
 		.masked.replace(/⟦VT[X]*\d+⟧/g, ' ')
 		.replace(/['’]/g, '')
 		.replace(/[^\p{L}\p{M}\s]/gu, ' ')
 		.replace(/\s+/g, ' ')
 		.trim()
 		.slice(0, 512)
-	return sample.includes(' ') || (sample.match(/\p{L}/gu)?.length ?? 0) >= 40
-		? sample
-		: ''
 }

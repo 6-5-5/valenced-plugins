@@ -6,19 +6,10 @@ Bundled third-party code retains the notices and MIT permissions below.
 
 ## Bundled packages (MIT)
 
-- [franc-min 6.2.0](https://github.com/wooorm/franc/tree/6.2.0/packages/franc-min)
-  - Copyright (c) 2014 Titus Wormer <tituswormer@gmail.com>
-  - Copyright (c) 2008 Kent S Johnson
-  - Copyright (c) 2006 Jacob R Rideout <kde@jacobrideout.net>
-  - Copyright (c) 2004 Maciej Ceglowski
+- [tinyld 1.3.4](https://github.com/komodojp/tinyld)
+  - Copyright (c) 2021 Komodo
 - [iso-639-3 3.0.1](https://github.com/wooorm/iso-639-3)
   - Copyright (c) 2014 Titus Wormer <tituswormer@gmail.com>
-- [trigram-utils 2.0.1](https://github.com/wooorm/trigram-utils)
-  - Copyright (c) 2014 Titus Wormer <tituswormer@gmail.com>
-- [n-gram 2.0.2](https://github.com/words/n-gram)
-  - Copyright (c) 2014 Titus Wormer <tituswormer@gmail.com>
-- [collapse-white-space 2.1.0](https://github.com/wooorm/collapse-white-space)
-  - Copyright (c) 2015 Titus Wormer <tituswormer@gmail.com>
 
 The following license applies to each package above:
 

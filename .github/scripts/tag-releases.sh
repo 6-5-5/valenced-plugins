@@ -25,7 +25,7 @@ jq -r '.[] | [.tag, .id, .version, .file, .commit] | @tsv' "$POOL_CHECKOUT/relea
             gh release create "$tag" \
                 --verify-tag \
                 --title "$tag" \
-                --notes "Automated release of \`${id}\` ${version}. Matching source, including bundled dependencies, is attached." \
+                --notes "Automated release of \`${id}\` ${version}." \
                 "${flags[@]}"
             echo "+ ${tag}"
         fi
