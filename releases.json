@@ -2,10 +2,10 @@
   {
     "name": "valate",
     "id": "cookie.valate",
-    "version": "1.0.1",
-    "tag": "valate@1.0.1",
-    "zip": "build/dist/cookie.valate@1.0.1.zip",
-    "file": "cookie.valate@1.0.1.zip",
-    "commit": "bc1350d52864e9caf2b2f851523c3716edf3a5a8"
+    "version": "1.0.2",
+    "tag": "valate@1.0.2",
+    "zip": "build/dist/cookie.valate@1.0.2.zip",
+    "file": "cookie.valate@1.0.2.zip",
+    "commit": "49376162b2fd6bfa7fd6165c4ec4d229227d34c9"
   }
 ]
