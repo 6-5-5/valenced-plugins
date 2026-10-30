@@ -16,6 +16,7 @@ export interface Settings {
 	autoChannels?: { id: string; guildId?: string }[]
 	understoodLanguages?: string[]
 	target: string
+	google: { enabled: boolean }
 	deepl: { enabled: boolean; key: string; pro: boolean; keyless?: boolean }
 	libre: { enabled: boolean; url: string; key: string }
 	oai: { enabled: boolean; url: string; key: string; model: string }
@@ -24,6 +25,7 @@ export interface Settings {
 export const Defaults: Settings = {
 	provider: 'deepl',
 	target: 'en',
+	google: { enabled: true },
 	deepl: { enabled: true, key: '', pro: false, keyless: true },
 	libre: { enabled: false, url: '', key: '' },
 	oai: { enabled: false, url: '', key: '', model: '' },
@@ -143,7 +145,7 @@ export function providerOrder(settings: Settings): Provider[] {
 
 export function enabledProviders(settings: Settings) {
 	return providerOrder(settings).filter(
-		provider => provider === 'google' || settings[provider].enabled,
+		provider => (settings[provider] ?? Defaults[provider]).enabled,
 	)
 }
 
@@ -178,10 +180,10 @@ export function baseUrl(value: string) {
 }
 
 export function validateProvider(settings: Settings, provider: Provider) {
+	if (!enabledProviders(settings).includes(provider))
+		throw new Error('Enable this provider in Valate settings first.')
 	if (provider === 'google') return
 	const config = settings[provider]
-	if (!config.enabled)
-		throw new Error('Enable this provider in Valate settings first.')
 	if (provider === 'deepl') {
 		if (settings.deepl.keyless) return
 		if (!settings.deepl.key.trim())

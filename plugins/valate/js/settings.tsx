@@ -1,10 +1,18 @@
 import Page from '@valenced/components/Page'
+import { ToastActionCreators } from '@valenced/discord/actions'
 import { Design } from '@valenced/discord/design'
+import {
+	onSettingsModulesLoaded,
+	refreshSettings,
+	registerSettingsItems,
+} from '@valenced/discord/modules/settings'
+import { ReactNavigationNative } from '@valenced/externals/react-navigation'
 import { useEffect, useRef, useState } from 'react'
 import { ScrollView } from 'react-native'
 import ChannelList from './channel-list'
 import { removeChannel } from './channels'
 import {
+	baseUrl,
 	Defaults,
 	enabledProviders,
 	GeminiUrl,
@@ -21,10 +29,181 @@ import type { ComponentProps } from 'react'
 import type { Provider, Settings } from './config'
 
 type Props = ComponentProps<PluginSettingsComponent<{ jsonStorage: Settings }>>
+type SettingsPage = Provider | 'language' | 'priority' | 'channels' | null
+
+class SettingsFieldError extends Error {
+	constructor(
+		public field: string,
+		message: string,
+	) {
+		super(message)
+	}
+}
+
+export function createSettingsEditor(
+	storage: Props['api']['jsonStorage'],
+	page: SettingsPage,
+) {
+	let draft = { ...Defaults, ...storage.cache }
+	let saved = JSON.stringify(value())
+	let queue = Promise.resolve()
+	let pending: { value: string; promise: Promise<void> } | undefined
+	function value() {
+		if (page === 'language') return { target: draft.target }
+		if (page === 'channels')
+			return { understoodLanguages: draft.understoodLanguages ?? [] }
+		if (!page || page === 'priority') return {}
+		return { [page]: draft[page] }
+	}
+	return {
+		get draft() {
+			return draft
+		},
+		change(next: Settings) {
+			draft = next
+		},
+		provider(provider: Provider, patch: Record<string, string | boolean>) {
+			const current = draft[provider]
+			if ('url' in patch && 'url' in current && patch.url !== current.url) {
+				patch = {
+					...patch,
+					key: '',
+					...(provider === 'oai' ? { model: '' } : {}),
+				}
+			}
+			draft = { ...draft, [provider]: { ...current, ...patch } }
+			return draft
+		},
+		disable(provider: Provider) {
+			const promise = queue
+				.catch(() => {})
+				.then(() => storage.set({ [provider]: { enabled: false } }))
+				.then(() => {
+					saved = ''
+				})
+			queue = promise
+			pending = { value: 'disable', promise }
+			return promise.finally(() => {
+				if (pending?.promise === promise) pending = undefined
+			})
+		},
+		async commit() {
+			const raw = JSON.stringify(value())
+			if (raw === saved && !pending) return
+			if (pending?.value === raw) return pending.promise
+			let field = 'target'
+			let patch: Partial<Settings>
+			try {
+				if (page === 'language') {
+					patch = { target: validateTarget(draft.target.trim()) }
+				} else if (page === 'channels') {
+					field = 'understoodLanguages'
+					const understoodLanguages = [
+						...new Set(draft.understoodLanguages ?? []),
+					]
+					for (const code of understoodLanguages) validateTarget(code)
+					patch = { understoodLanguages }
+				} else if (page === 'google') {
+					patch = { google: draft.google }
+				} else {
+					if (!page || page === 'priority') return
+					const config = { ...draft[page] }
+					field = 'key'
+					if (/[\r\n]/.test(config.key))
+						throw new Error('The API key contains a line break.')
+					if (page === 'deepl') {
+						if (draft.deepl.enabled) validateProvider(draft, page)
+					} else {
+						field = 'url'
+						const provider = page === 'oai' ? draft.oai : draft.libre
+						if (provider.url.trim() || provider.enabled)
+							Object.assign(config, { url: baseUrl(provider.url) })
+						if (page === 'oai') {
+							field = 'model'
+							if (
+								draft.oai.model.length > 200 ||
+								/[\r\n]/.test(draft.oai.model)
+							)
+								throw new Error('Enter a valid model ID.')
+							if (draft.oai.enabled) validateProvider(draft, page)
+						}
+					}
+					patch = { [page]: config }
+				}
+			} catch (error) {
+				throw new SettingsFieldError(field, (error as Error).message)
+			}
+			const promise = queue
+				.catch(() => {})
+				// shortcut: Valenced hides disk-write errors; reliable retries need the host to report them.
+				.then(() => storage.set(patch))
+				.then(() => {
+					saved = raw
+				})
+			queue = promise
+			pending = { value: raw, promise }
+			try {
+				await promise
+			} finally {
+				if (pending?.promise === promise) pending = undefined
+			}
+		},
+	}
+}
+
+const Pages = {
+	language: 'Target language',
+	priority: 'Provider priority',
+	channels: 'Auto-translate',
+	...ProviderNames,
+}
+const routeFor = (page: Exclude<SettingsPage, null>) => `cookie.valate.${page}`
+
+export function registerSettings(api: Props['api']) {
+	api.cleanup(
+		onSettingsModulesLoaded(() => {
+			api.cleanup(
+				registerSettingsItems(
+					Object.fromEntries(
+						Object.entries(Pages).map(([page, title]) => {
+							const name = page as Exclude<SettingsPage, null>
+							const Screen = () => (
+								<SettingsContent storage={api.jsonStorage} editing={name} />
+							)
+							return [
+								routeFor(name),
+								{
+									parent: null,
+									type: 'route',
+									unsearchable: true,
+									useTitle: () => title,
+									screen: { route: routeFor(name), getComponent: () => Screen },
+								},
+							]
+						}),
+					),
+				),
+				refreshSettings,
+			)
+			refreshSettings()
+		}),
+	)
+}
 
 export default function SettingsComponent({
 	api: { jsonStorage: storage },
 }: Props) {
+	return <SettingsContent storage={storage} editing={null} />
+}
+
+function SettingsContent({
+	storage,
+	editing,
+}: {
+	storage: Props['api']['jsonStorage']
+	editing: SettingsPage
+}) {
+	const navigation = ReactNavigationNative.useNavigation()
 	const {
 		Button,
 		TableRow,
@@ -35,44 +214,87 @@ export default function SettingsComponent({
 		Text,
 		TextInput,
 	} = Design
-	const settings = storage.use() ?? Defaults
-	const [editing, setEditing] = useState<
-		Provider | 'language' | 'priority' | 'channels' | null
-	>(null)
-	const [draft, setDraft] = useState(settings)
-	const [understood, setUnderstood] = useState('')
+	const settings = { ...Defaults, ...storage.use() }
+	const enabled = enabledProviders(settings)
+	const [editor] = useState(() => createSettingsEditor(storage, editing))
+	const [draft, setDraft] = useState(editor.draft)
+	const [understood, setUnderstood] = useState(
+		(settings.understoodLanguages ?? []).join(', '),
+	)
 	const [error, setError] = useState('')
+	const [fieldError, setFieldError] = useState<SettingsFieldError | null>(null)
 	const [models, setModels] = useState<string[]>([])
 	const [filter, setFilter] = useState('')
 	const [busy, setBusy] = useState(false)
-	const chosenProvider =
-		editing &&
-		editing !== 'language' &&
-		editing !== 'priority' &&
-		editing !== 'channels' &&
-		(editing === 'google' || draft[editing].enabled)
-			? editing
-			: null
 	const controller = useRef<AbortController | null>(null)
 	const modelCache = useRef<{
 		key: string
 		models: string[]
 		expires: number
 	} | null>(null)
-	useEffect(() => () => controller.current?.abort(), [])
-	function close() {
-		controller.current?.abort()
-		controller.current = null
-		setBusy(false)
-		setError('')
-		setEditing(null)
+	useEffect(() => {
+		const unsubscribe = navigation.addListener('beforeRemove', () => {
+			controller.current?.abort()
+			void editor.commit().catch((error: Error) => {
+				ToastActionCreators.open('valate-settings-error', {
+					text: `${error.message} Changes were not saved.`,
+					variant: 'critical',
+				})
+			})
+		})
+		return () => {
+			unsubscribe()
+			controller.current?.abort()
+		}
+	}, [navigation, editor])
+	async function commit(previous?: Settings, disable?: Provider) {
+		const committing = editor.draft
+		try {
+			await (disable ? editor.disable(disable) : editor.commit())
+			if (editor.draft !== committing) return
+			setError('')
+			setFieldError(null)
+		} catch (error) {
+			if (editor.draft !== committing) return
+			if (previous) {
+				editor.change(previous)
+				setDraft(previous)
+			}
+			if (error instanceof SettingsFieldError) setFieldError(error)
+			else setError('Could not save settings.')
+		}
 	}
-	function updateOai(value: Partial<Settings['oai']>) {
-		controller.current?.abort()
-		controller.current = null
-		setBusy(false)
-		setModels([])
-		setDraft({ ...draft, oai: { ...draft.oai, ...value } })
+	function change(next: Settings, immediate = false) {
+		const previous = editor.draft
+		editor.change(next)
+		setDraft(next)
+		setFieldError(null)
+		if (immediate) void commit(previous)
+	}
+	function inputError(field: string) {
+		return {
+			status:
+				fieldError?.field === field ? ('error' as const) : ('default' as const),
+			errorMessage:
+				fieldError?.field === field ? fieldError.message : undefined,
+			onBlur: () => commit(),
+		}
+	}
+	function updateProvider(
+		provider: Provider,
+		value: Record<string, string | boolean>,
+		immediate = false,
+	) {
+		const previous = editor.draft
+		if (provider === 'oai' && ('url' in value || 'key' in value)) {
+			controller.current?.abort()
+			controller.current = null
+			setBusy(false)
+			setModels([])
+		}
+		change(editor.provider(provider, value))
+		if (immediate)
+			void commit(previous, value.enabled === false ? provider : undefined)
 	}
 	async function loadModels() {
 		const key = JSON.stringify([draft.oai.url, draft.oai.key])
@@ -112,60 +334,6 @@ export default function SettingsComponent({
 		} finally {
 			clearTimeout(timer)
 			if (controller.current === request) setBusy(false)
-		}
-	}
-	async function save() {
-		if (busy) return
-		setBusy(true)
-		setError('')
-		try {
-			const understoodLanguages =
-				editing === 'channels'
-					? [
-							...new Set(
-								understood
-									.split(',')
-									.map(code => code.trim().toLowerCase())
-									.filter(Boolean),
-							),
-						]
-					: draft.understoodLanguages
-			for (const code of understoodLanguages ?? []) validateTarget(code)
-			if (editing === 'channels') {
-				await storage.set({ understoodLanguages })
-				close()
-				return
-			}
-			validateTarget(draft.target)
-			if (
-				editing &&
-				editing !== 'language' &&
-				editing !== 'priority' &&
-				editing !== 'google' &&
-				draft[editing].enabled
-			)
-				validateProvider(draft, editing)
-			const priority = providerOrder(draft)
-			const next = {
-				...draft,
-				autoChannels: { ...Defaults, ...storage.cache }.autoChannels,
-				understoodLanguages,
-				provider: chosenProvider ?? draft.provider,
-				priority: chosenProvider
-					? [
-							chosenProvider,
-							...priority.filter(provider => provider !== chosenProvider),
-						]
-					: priority,
-			}
-			if (next.provider !== 'google' && !next[next.provider].enabled)
-				next.provider = 'google'
-			await storage.set(next, true)
-			close()
-		} catch (error) {
-			setError((error as Error).message)
-		} finally {
-			setBusy(false)
 		}
 	}
 	async function moveUp(provider: Provider) {
@@ -210,6 +378,7 @@ export default function SettingsComponent({
 	}
 	return (
 		<ScrollView
+			style={{ flex: 1 }}
 			keyboardShouldPersistTaps="handled"
 			keyboardDismissMode="on-drag"
 			contentContainerStyle={{ paddingBottom: 32 }}
@@ -217,7 +386,6 @@ export default function SettingsComponent({
 			<Page spacing={16}>
 				{!editing ? (
 					<>
-						<Text variant="heading-lg/semibold">Valate</Text>
 						<Text variant="text-sm/normal" color="text-muted">
 							Long-press a message to translate. Only you see the result.
 						</Text>
@@ -233,21 +401,17 @@ export default function SettingsComponent({
 								label="Translate to"
 								subLabel={language(settings.target)}
 								arrow
-								onPress={() => {
-									setError('')
-									setDraft(settings)
-									setFilter('')
-									setEditing('language')
-								}}
+								onPress={() => navigation.navigate(routeFor('language'))}
 							/>
 							<TableRow
 								label="Provider priority"
-								subLabel={`${ProviderNames[enabledProviders(settings)[0]]} first · fallback on failure`}
+								subLabel={
+									enabled.length
+										? `${ProviderNames[enabled[0]]} first · fallback on failure`
+										: 'All providers disabled'
+								}
 								arrow
-								onPress={() => {
-									setError('')
-									setEditing('priority')
-								}}
+								onPress={() => navigation.navigate(routeFor('priority'))}
 							/>
 						</TableRowGroup>
 						<TableRowGroup
@@ -262,11 +426,7 @@ export default function SettingsComponent({
 										: 'Off in all channels'
 								}
 								arrow
-								onPress={() => {
-									setError('')
-									setUnderstood((settings.understoodLanguages ?? []).join(', '))
-									setEditing('channels')
-								}}
+								onPress={() => navigation.navigate(routeFor('channels'))}
 							/>
 						</TableRowGroup>
 						<TableRowGroup
@@ -278,20 +438,14 @@ export default function SettingsComponent({
 									key={provider}
 									label={ProviderNames[provider]}
 									subLabel={
-										enabledProviders(settings)[0] === provider
+										enabled[0] === provider
 											? 'Used first'
-											: provider === 'google' || settings[provider].enabled
+											: settings[provider].enabled
 												? 'Fallback'
 												: 'Disabled'
 									}
 									arrow
-									onPress={() => {
-										setError('')
-										setDraft(settings)
-										setModels([])
-										setFilter('')
-										setEditing(provider)
-									}}
+									onPress={() => navigation.navigate(routeFor(provider))}
 								/>
 							))}
 						</TableRowGroup>
@@ -303,13 +457,22 @@ export default function SettingsComponent({
 					</>
 				) : editing === 'channels' ? (
 					<>
-						<Text variant="heading-lg/semibold">Auto-translate</Text>
 						<TextInput
 							label="Languages to skip"
 							placeholder="es, fr, ja"
 							description={`Your target language (${language(settings.target)}) is always skipped. Add other language codes, separated by commas.`}
 							value={understood}
-							onChange={setUnderstood}
+							onChange={value => {
+								setUnderstood(value)
+								change({
+									...draft,
+									understoodLanguages: value
+										.split(',')
+										.map(code => code.trim().toLowerCase())
+										.filter(Boolean),
+								})
+							}}
+							{...inputError('understoodLanguages')}
 							isDisabled={busy}
 							maxLength={256}
 						/>
@@ -323,21 +486,15 @@ export default function SettingsComponent({
 								{error}
 							</Text>
 						)}
-						<Button text="Done" disabled={busy} onPress={save} />
 					</>
 				) : editing === 'priority' ? (
 					<>
-						<Text variant="heading-lg/semibold">Provider priority</Text>
 						<TableRowGroup description="The first enabled provider runs first. If it fails, the next enabled provider is tried.">
 							{providerOrder(settings).map((provider, index) => (
 								<TableRow
 									key={provider}
 									label={`${index + 1}. ${ProviderNames[provider]}`}
-									subLabel={
-										provider === 'google' || settings[provider].enabled
-											? undefined
-											: 'Disabled'
-									}
+									subLabel={settings[provider].enabled ? undefined : 'Disabled'}
 									trailing={
 										index > 0 ? (
 											<Button
@@ -358,15 +515,9 @@ export default function SettingsComponent({
 								{error}
 							</Text>
 						)}
-						<Button text="Done" disabled={busy} onPress={close} />
 					</>
 				) : (
 					<>
-						<Text variant="heading-lg/semibold">
-							{editing === 'language'
-								? 'Target language'
-								: ProviderNames[editing]}
-						</Text>
 						{editing === 'language' ? (
 							<>
 								<TextInput
@@ -374,7 +525,8 @@ export default function SettingsComponent({
 									placeholder="en, es or pt-BR"
 									description="Any code your provider supports. Suggestions are not a provider support list."
 									value={draft.target}
-									onChange={target => setDraft({ ...draft, target })}
+									onChange={target => change({ ...draft, target })}
+									{...inputError('target')}
 									maxLength={32}
 								/>
 								<TextInput
@@ -387,7 +539,9 @@ export default function SettingsComponent({
 								/>
 								<TableRadioGroup
 									value={draft.target}
-									onChange={(target: string) => setDraft({ ...draft, target })}
+									onChange={(target: string) =>
+										change({ ...draft, target }, true)
+									}
 								>
 									{Object.entries(Languages)
 										.filter(([code, name]) =>
@@ -405,8 +559,6 @@ export default function SettingsComponent({
 										))}
 								</TableRadioGroup>
 							</>
-						) : editing === 'google' ? (
-							<Text variant="text-md/normal">Free. Unofficial endpoint.</Text>
 						) : (
 							<>
 								<TableRowGroup>
@@ -414,14 +566,15 @@ export default function SettingsComponent({
 										label="Enabled"
 										value={draft[editing].enabled}
 										onValueChange={enabled =>
-											setDraft({
-												...draft,
-												[editing]: { ...draft[editing], enabled },
-											})
+											updateProvider(editing, { enabled }, true)
 										}
 									/>
 								</TableRowGroup>
-								{editing === 'deepl' ? (
+								{editing === 'google' ? (
+									<Text variant="text-md/normal">
+										Free. Unofficial endpoint.
+									</Text>
+								) : editing === 'deepl' ? (
 									<>
 										<TableRadioGroup
 											title="Service"
@@ -438,17 +591,17 @@ export default function SettingsComponent({
 														: 'api-free'
 											}
 											onChange={(mode: 'keyless' | 'api-free' | 'api-pro') =>
-												setDraft({
-													...draft,
-													deepl: {
-														...draft.deepl,
+												updateProvider(
+													'deepl',
+													{
 														keyless: mode === 'keyless',
 														pro:
 															mode === 'keyless'
 																? draft.deepl.pro
 																: mode === 'api-pro',
 													},
-												})
+													true,
+												)
 											}
 										>
 											<TableRadioRow
@@ -470,19 +623,16 @@ export default function SettingsComponent({
 												disabled={busy}
 											/>
 										</TableRadioGroup>
-										{!draft.deepl.keyless && (
-											<TextInput
-												label="API key"
-												description="Use a key for the selected API plan."
-												secureTextEntry
-												value={draft.deepl.key}
-												onChange={key =>
-													setDraft({ ...draft, deepl: { ...draft.deepl, key } })
-												}
-												isDisabled={busy}
-												maxLength={512}
-											/>
-										)}
+										<TextInput
+											label="API key"
+											description="Required for API Free/Pro. Free does not use this key."
+											secureTextEntry
+											value={draft.deepl.key}
+											onChange={key => updateProvider('deepl', { key })}
+											{...inputError('key')}
+											isDisabled={busy}
+											maxLength={512}
+										/>
 									</>
 								) : editing === 'libre' ? (
 									<>
@@ -490,18 +640,16 @@ export default function SettingsComponent({
 											label="Instance URL"
 											placeholder="https://translate.example.org/"
 											value={draft.libre.url}
-											onChange={url =>
-												setDraft({ ...draft, libre: { ...draft.libre, url } })
-											}
+											onChange={url => updateProvider('libre', { url })}
+											{...inputError('url')}
 											maxLength={2048}
 										/>
 										<TextInput
 											label="API key (optional)"
 											secureTextEntry
 											value={draft.libre.key}
-											onChange={key =>
-												setDraft({ ...draft, libre: { ...draft.libre, key } })
-											}
+											onChange={key => updateProvider('libre', { key })}
+											{...inputError('key')}
 											maxLength={512}
 										/>
 									</>
@@ -511,7 +659,7 @@ export default function SettingsComponent({
 											text="Use Gemini endpoint"
 											variant="secondary"
 											onPress={() => {
-												updateOai({ url: GeminiUrl, key: '', model: '' })
+												updateProvider('oai', { url: GeminiUrl })
 												setError('Add your Gemini key and choose a model.')
 											}}
 										/>
@@ -519,23 +667,24 @@ export default function SettingsComponent({
 											label="API base URL"
 											placeholder="https://api.openai.com/v1/"
 											value={draft.oai.url}
-											onChange={url => updateOai({ url })}
+											onChange={url => updateProvider('oai', { url })}
+											{...inputError('url')}
 											maxLength={2048}
 										/>
 										<TextInput
 											label="API key (optional)"
 											secureTextEntry
 											value={draft.oai.key}
-											onChange={key => updateOai({ key })}
+											onChange={key => updateProvider('oai', { key })}
+											{...inputError('key')}
 											maxLength={512}
 										/>
 										<TextInput
 											label="Model ID"
 											placeholder="Enter or select a chat model"
 											value={draft.oai.model}
-											onChange={model =>
-												setDraft({ ...draft, oai: { ...draft.oai, model } })
-											}
+											onChange={model => updateProvider('oai', { model })}
+											{...inputError('model')}
 											maxLength={200}
 										/>
 										<Button
@@ -556,7 +705,7 @@ export default function SettingsComponent({
 												<TableRadioGroup
 													value={draft.oai.model}
 													onChange={(model: string) =>
-														setDraft({ ...draft, oai: { ...draft.oai, model } })
+														updateProvider('oai', { model }, true)
 													}
 												>
 													{models
@@ -588,12 +737,6 @@ export default function SettingsComponent({
 								{error}
 							</Text>
 						)}
-						<Button
-							text={chosenProvider ? 'Save and use' : 'Save'}
-							disabled={busy}
-							onPress={save}
-						/>
-						<Button text="Cancel" variant="tertiary" onPress={close} />
 					</>
 				)}
 			</Page>

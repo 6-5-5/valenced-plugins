@@ -5,7 +5,13 @@ import {
 import { Design } from '@valenced/discord/design'
 import { Clipboard } from '@valenced/externals/react-native-clipboard'
 import { useEffect, useRef, useState } from 'react'
-import { Defaults, enabledProviders, language, ProviderNames } from './config'
+import {
+	Defaults,
+	enabledProviders,
+	language,
+	ProviderNames,
+	validateTarget,
+} from './config'
 import { splitSpoilers } from './text'
 import type { JsonStorage } from '@valenced/json-storage'
 import type { Provider, Settings } from './config'
@@ -13,11 +19,92 @@ import type { Translation } from './providers'
 import type { TranslationService } from './service'
 
 export const SheetKey = 'valate-translation'
+export const OptionsSheetKey = 'valate-translation-options'
 
 interface Props {
 	text: string
 	storage: JsonStorage<Settings>
 	service: TranslationService
+}
+
+function TranslationOptionsSheet({
+	storage,
+	target,
+	provider,
+	translate,
+}: {
+	storage: JsonStorage<Settings>
+	target: string
+	provider: Provider
+	translate(target: string, provider: Provider): void
+}) {
+	const {
+		ActionSheet,
+		BottomSheetTitleHeader,
+		Button,
+		Stack,
+		TableRadioGroup,
+		TableRadioRow,
+		TextInput,
+	} = Design
+	const settings = storage.use() ?? Defaults
+	const [draftTarget, setDraftTarget] = useState(target)
+	const [draftProvider, setDraftProvider] = useState(provider)
+	const [error, setError] = useState('')
+	const close = () => ActionSheetActionCreators.hideActionSheet(OptionsSheetKey)
+	return (
+		<ActionSheet
+			scrollable
+			startExpanded
+			keyboardShouldPersistTaps="handled"
+			header={
+				<BottomSheetTitleHeader
+					title="Translation options"
+					leading={
+						<Button text="Back" size="sm" variant="tertiary" onPress={close} />
+					}
+				/>
+			}
+		>
+			<Stack spacing={16} style={{ paddingBottom: 24 }}>
+				<TextInput
+					label="Target language code"
+					placeholder="en, es or pt-BR"
+					value={draftTarget}
+					onChange={value => {
+						setDraftTarget(value)
+						setError('')
+					}}
+					maxLength={32}
+					status={error ? 'error' : 'default'}
+					errorMessage={error || undefined}
+				/>
+				<TableRadioGroup value={draftProvider} onChange={setDraftProvider}>
+					{enabledProviders(settings).map(value => (
+						<TableRadioRow
+							key={value}
+							label={ProviderNames[value]}
+							value={value}
+						/>
+					))}
+				</TableRadioGroup>
+				<Button
+					text="Translate"
+					disabled={!enabledProviders(settings).includes(draftProvider)}
+					onPress={() => {
+						try {
+							validateTarget(draftTarget.trim())
+						} catch (error) {
+							setError((error as Error).message)
+							return
+						}
+						close()
+						translate(draftTarget.trim(), draftProvider)
+					}}
+				/>
+			</Stack>
+		</ActionSheet>
+	)
 }
 
 function Spoiler({ text }: { text: string }) {
@@ -51,22 +138,12 @@ function SpoilerText({ text }: { text: string }) {
 }
 
 export default function TranslationSheet({ text, storage, service }: Props) {
-	const {
-		ActionSheet,
-		BottomSheetTitleHeader,
-		Button,
-		Stack,
-		TableRadioGroup,
-		TableRadioRow,
-		Text,
-		TextInput,
-	} = Design
+	const { ActionSheet, BottomSheetTitleHeader, Button, Stack, Text } = Design
 	const settings = storage.use() ?? Defaults
-	const [provider, setProvider] = useState<Provider>(
-		enabledProviders(settings)[0],
-	)
-	const [target, setTarget] = useState(settings.target)
-	const [options, setOptions] = useState(false)
+	const [{ provider, target }, setSelection] = useState({
+		provider: enabledProviders(settings)[0] ?? settings.provider,
+		target: settings.target,
+	})
 	const [result, setResult] = useState<Translation | null>(null)
 	const [error, setError] = useState('')
 	const [attempt, setAttempt] = useState(0)
@@ -101,10 +178,13 @@ export default function TranslationSheet({ text, storage, service }: Props) {
 			})
 		return () => request.abort()
 	}, [settings, provider, text, target, attempt, service])
-	const [draftTarget, setDraftTarget] = useState(target)
-	const [draftProvider, setDraftProvider] = useState(provider)
+	useEffect(
+		() => () => ActionSheetActionCreators.hideActionSheet(OptionsSheetKey),
+		[],
+	)
 	function close() {
 		controller.current?.abort()
+		ActionSheetActionCreators.hideActionSheet(OptionsSheetKey)
 		ActionSheetActionCreators.hideActionSheet(SheetKey)
 	}
 	return (
@@ -117,93 +197,69 @@ export default function TranslationSheet({ text, storage, service }: Props) {
 				<BottomSheetTitleHeader
 					title="Valate"
 					subtitle={`${ProviderNames[result?.provider ?? provider]} → ${language(target)}`}
+					trailing={
+						<Button
+							text={busy ? 'Cancel' : 'Close'}
+							size="sm"
+							variant="tertiary"
+							onPress={close}
+						/>
+					}
 				/>
 			}
 		>
 			<Stack spacing={16} style={{ paddingBottom: 24 }}>
-				{options ? (
-					<>
-						<TextInput
-							label="Target language code"
-							placeholder="en, es or pt-BR"
-							value={draftTarget}
-							onChange={setDraftTarget}
-							maxLength={32}
-						/>
-						<TableRadioGroup value={draftProvider} onChange={setDraftProvider}>
-							{enabledProviders(settings).map(value => (
-								<TableRadioRow
-									key={value}
-									label={ProviderNames[value]}
-									value={value}
-								/>
-							))}
-						</TableRadioGroup>
-						<Button
-							text="Translate"
-							onPress={() => {
-								setTarget(draftTarget.trim())
-								setProvider(draftProvider)
-								setOptions(false)
-							}}
-						/>
-						<Button
-							text="Back"
-							variant="tertiary"
-							onPress={() => setOptions(false)}
-						/>
-					</>
-				) : (
-					<>
-						<Text variant="text-sm/normal" color="text-muted">
-							Original
-						</Text>
-						<SpoilerText text={text} />
-						<Text variant="text-sm/normal" color="text-muted">
-							{result
-								? `Translation [${ProviderNames[result.provider]}]`
-								: 'Translation'}
-							{result?.source
-								? ` · from ${language(result.source.toLowerCase())}`
-								: ''}
-						</Text>
-						<SpoilerText
-							text={busy ? 'Translating…' : (result?.text ?? error)}
-						/>
-						{result && (
-							<Button
-								text="Copy translation"
-								onPress={() => {
-									Clipboard.setString(result.text)
-									ToastActionCreators.open('valate-copied', {
-										text: 'Translation copied',
-										variant: 'success',
-									})
-								}}
-							/>
-						)}
-						{!busy && (
-							<Button
-								text="Retry translation"
-								variant="secondary"
-								onPress={() => setAttempt(attempt + 1)}
-							/>
-						)}
-						<Button
-							text="Change language or provider"
-							variant="tertiary"
-							onPress={() => {
-								setDraftTarget(target)
-								setDraftProvider(provider)
-								setOptions(true)
-							}}
-						/>
-					</>
+				<Text variant="text-sm/normal" color="text-muted">
+					Original
+				</Text>
+				<SpoilerText text={text} />
+				<Text variant="text-sm/normal" color="text-muted">
+					{result
+						? `Translation [${ProviderNames[result.provider]}]`
+						: 'Translation'}
+					{result?.source
+						? ` · from ${language(result.source.toLowerCase())}`
+						: ''}
+				</Text>
+				<SpoilerText text={busy ? 'Translating…' : (result?.text ?? error)} />
+				{result && (
+					<Button
+						text="Copy translation"
+						onPress={() => {
+							Clipboard.setString(result.text)
+							ToastActionCreators.open('valate-copied', {
+								text: 'Translation copied',
+								variant: 'success',
+							})
+						}}
+					/>
+				)}
+				{!busy && (
+					<Button
+						text="Retry translation"
+						variant="secondary"
+						onPress={() => setAttempt(attempt + 1)}
+					/>
 				)}
 				<Button
-					text={busy ? 'Cancel' : 'Close'}
+					text="Change language or provider"
 					variant="tertiary"
-					onPress={close}
+					onPress={() => {
+						ActionSheetActionCreators.openLazy(
+							Promise.resolve({ default: TranslationOptionsSheet }),
+							OptionsSheetKey,
+							{
+								storage,
+								target,
+								provider,
+								translate(target, provider) {
+									setSelection({ target, provider })
+									setAttempt(attempt => attempt + 1)
+								},
+							},
+							'stack',
+						)
+					}}
 				/>
 			</Stack>
 		</ActionSheet>

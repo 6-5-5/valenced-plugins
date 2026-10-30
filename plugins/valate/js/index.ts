@@ -4,13 +4,15 @@ import { watchIncoming } from './incoming'
 import { patchMenus } from './menus'
 import { patchRenderer } from './renderer'
 import { createService } from './service'
-import SettingsComponent from './settings'
-import { SheetKey } from './sheet'
+import SettingsComponent, { registerSettings } from './settings'
+import { OptionsSheetKey, SheetKey } from './sheet'
 import type { Settings } from './config'
 
 export default plugin<{ jsonStorage: Settings }>({
 	jsonStorage: { load: true, default: Defaults },
-	start({ cleanup, jsonStorage, logger }) {
+	start(api) {
+		const { cleanup, jsonStorage, logger } = api
+		registerSettings(api)
 		const service = createService()
 		const renderer = patchRenderer(cleanup)
 		const getChannel = watchIncoming(jsonStorage, service, renderer, cleanup)
@@ -21,6 +23,7 @@ export default plugin<{ jsonStorage: Settings }>({
 				renderer.display.clear()
 			}),
 			() => ActionSheetActionCreators.hideActionSheet(SheetKey),
+			() => ActionSheetActionCreators.hideActionSheet(OptionsSheetKey),
 		)
 		let warned = false
 		patchMenus(
