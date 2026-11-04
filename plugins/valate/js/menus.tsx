@@ -1,21 +1,13 @@
 import { Design } from '@valenced/discord/design'
 import { getModules } from '@valenced/modules/finders'
 import { withName } from '@valenced/modules/finders/filters'
-import { after } from '@valenced/patcher'
-import { ReactJSXRuntime } from '@valenced/react'
-import { afterJSX } from '@valenced/react/jsx-runtime'
+import { instead } from '@valenced/patcher'
 import { lookupGeneratedIconComponent } from '@valenced/utils/discord'
-import {
-	Children,
-	cloneElement,
-	createContext,
-	isValidElement,
-	useContext,
-} from 'react'
+import { cloneElement, isValidElement } from 'react'
 import { createMessageAction } from './actionsheet'
 import { createChannelAction } from './channels'
 import type { JsonStorage } from '@valenced/json-storage'
-import type { FC, ReactElement, ReactNode } from 'react'
+import type { ReactElement, ReactNode } from 'react'
 import type { MessageSheetProps } from './actionsheet'
 import type { ChannelSheetProps } from './channels'
 import type { Settings } from './config'
@@ -23,14 +15,12 @@ import type { Channel } from './incoming'
 import type { patchRenderer } from './renderer'
 import type { TranslationService } from './service'
 
-type Menu =
-	| { kind: 'message'; props: MessageSheetProps }
-	| { kind: 'channel'; props: ChannelSheetProps }
 type Element = ReactElement<{
 	children?: ReactNode
 	icon?: ReactNode
 	IconComponent?: unknown
 }>
+type Sheet<P> = (props: P) => ReactNode
 
 function insertAfterCopy(
 	node: ReactNode,
@@ -51,29 +41,81 @@ function insertAfterCopy(
 		const element = node as Element
 		if (element.type === ActionSheetRow.Group) {
 			const before = matches
-			const rows = Children.toArray(element.props.children).flatMap(child => {
-				if (!isValidElement(child) || child.type !== ActionSheetRow)
-					return [child]
-				const icon = (child as Element).props.icon
-				if (!isValidElement(icon)) return [child]
-				if (
-					icon.type !== copyIcon &&
-					(icon as Element).props.IconComponent !== copyIcon
-				)
-					return [child]
-				matches++
-				return [child, action]
-			})
-			return matches === before ? node : cloneElement(element, {}, ...rows)
+			const children = element.props.children
+			const rows = (Array.isArray(children) ? children : [children]).flatMap(
+				child => {
+					if (!isValidElement(child) || child.type !== ActionSheetRow)
+						return [child]
+					const icon = (child as Element).props.icon
+					if (!isValidElement(icon)) return [child]
+					if (
+						icon.type !== copyIcon &&
+						(icon as Element).props.IconComponent !== copyIcon
+					)
+						return [child]
+					matches++
+					return [child, action]
+				},
+			)
+			return matches === before
+				? node
+				: cloneElement(element, { children: rows })
 		}
 		if (!element.props.children) return node
 		const children = visit(element.props.children)
 		return children === element.props.children
 			? node
-			: cloneElement(element, {}, children)
+			: cloneElement(element, { children })
 	}
 	const result = visit(node)
 	return matches === 1 ? result : undefined
+}
+
+function containsAction(node: ReactNode, key: string): boolean {
+	if (Array.isArray(node)) return node.some(child => containsAction(child, key))
+	if (!isValidElement(node)) return false
+	return (
+		node.key === key || containsAction((node as Element).props.children, key)
+	)
+}
+
+function insertAction(
+	node: ReactNode,
+	action: ReactElement,
+	key: string,
+	copyIcon?: unknown,
+): ReactNode {
+	if (Array.isArray(node)) {
+		const children = node.map(child =>
+			insertAction(child, action, key, copyIcon),
+		)
+		return children.some((child, index) => child !== node[index])
+			? children
+			: node
+	}
+	if (!isValidElement(node)) return node
+	const element = node as Element
+	if (element.type === Design.ActionSheet) {
+		if (containsAction(element.props.children, key)) return node
+		const inline = insertAfterCopy(element.props.children, action, copyIcon)
+		const children = element.props.children
+		return cloneElement(element, {
+			children: inline ?? [
+				...(Array.isArray(children)
+					? children
+					: children == null
+						? []
+						: [children]),
+				<Design.ActionSheetRow.Group key={key} hasIcons>
+					{action}
+				</Design.ActionSheetRow.Group>,
+			],
+		})
+	}
+	const children = insertAction(element.props.children, action, key, copyIcon)
+	return children === element.props.children
+		? node
+		: cloneElement(element, { children })
 }
 
 export function patchMenus(
@@ -84,7 +126,6 @@ export function patchMenus(
 	onError: () => void,
 	renderer: ReturnType<typeof patchRenderer>,
 ) {
-	const Context = createContext<Menu | null>(null)
 	const messageAction = createMessageAction(
 		storage,
 		service,
@@ -93,101 +134,80 @@ export function patchMenus(
 		renderer,
 	)
 	const channelAction = createChannelAction(storage, getChannel, cleanup)
-	const contexts = new Map<
-		string,
-		(element: ReactElement) => Menu | undefined
-	>()
 	let copyIcon: unknown
 	let active = true
 	cleanup(() => {
 		active = false
-		contexts.clear()
 	})
-	function MenuAction({
-		kind,
-		inline = false,
-	}: {
-		kind: Menu['kind']
-		inline?: boolean
-	}) {
-		const menu = useContext(Context)
-		if (!active || menu?.kind !== kind) return null
-		const action =
-			menu.kind === 'message'
-				? messageAction(menu.props)
-				: channelAction(menu.props)
-		if (!action || inline) return action
-		return <Design.ActionSheetRow.Group>{action}</Design.ActionSheetRow.Group>
-	}
-	function provide<P>(name: string, context: (props: P) => Menu) {
+	function patch<P>(
+		name: string,
+		makeAction: (props: P) => ReactElement | null,
+		key: string,
+		inner = false,
+	) {
+		const renders = new WeakMap<Sheet<P>, Sheet<P>>()
+		function edit(tree: ReactNode, props: P) {
+			if (!active) return tree
+			try {
+				const action = makeAction(props)
+				if (!action) return tree
+				return insertAction(
+					tree,
+					action,
+					key,
+					inner
+						? undefined
+						: (copyIcon ??= lookupGeneratedIconComponent('CopyIcon')),
+				)
+			} catch {
+				onError()
+				return tree
+			}
+		}
+		function renderMenu(this: unknown, args: [P], original: Sheet<P>) {
+			const tree = original.apply(this, args)
+			if (!active) return tree
+			if (!inner || !isValidElement(tree) || typeof tree.type !== 'function')
+				return edit(tree, args[0])
+			try {
+				const Inner = tree.type as Sheet<P>
+				let render = renders.get(Inner)
+				if (!render) {
+					const target = { render: Inner }
+					cleanup(
+						instead(target, 'render', function (args, original) {
+							return edit(original.apply(this, args), args[0])
+						}),
+					)
+					render = target.render
+					renders.set(Inner, render)
+				}
+				return { ...tree, type: render }
+			} catch {
+				onError()
+				return tree
+			}
+		}
 		cleanup(
 			getModules(
-				withName<FC<P>>(name),
+				withName<Sheet<P>>(name),
 				exports => {
-					const module = exports as { default: FC<P> }
-					const original = module.default
-					contexts.set(name, element =>
-						element.type === original || element.type === module.default
-							? context(element.props as P)
-							: undefined,
-					)
+					const module = exports as { default: Sheet<P> }
+					cleanup(instead(module, 'default', renderMenu))
 				},
 				{ returnNamespace: true },
 			),
 		)
 	}
-	provide<MessageSheetProps>('LongPressMessageActionSheet', props => ({
-		kind: 'message',
-		props,
-	}))
-	provide<ChannelSheetProps>('ChannelLongPressActionSheet', props => ({
-		kind: 'channel',
-		props,
-	}))
-	function provideContext(element: ReactElement) {
-		if (
-			!active ||
-			!isValidElement(element) ||
-			typeof element.type !== 'function'
-		)
-			return element
-		try {
-			const menu = contexts.get(element.type.name)?.(element)
-			if (menu)
-				return (
-					<Context.Provider key={element.key} value={menu}>
-						{element}
-					</Context.Provider>
-				)
-		} catch {
-			onError()
-		}
-		return element
-	}
-	cleanup(
-		after(ReactJSXRuntime, 'jsx', provideContext),
-		after(ReactJSXRuntime, 'jsxs', provideContext),
-		afterJSX(Design.ActionSheet, element => {
-			if (!active) return element
-			try {
-				const children = insertAfterCopy(
-					element.props.children,
-					<MenuAction key="valate-translate" kind="message" inline />,
-					(copyIcon ??= lookupGeneratedIconComponent('CopyIcon')),
-				)
-				return cloneElement(
-					element,
-					{},
-					...Children.toArray(children ?? element.props.children),
-					children === undefined ? (
-						<MenuAction key="valate-translate" kind="message" />
-					) : null,
-					<MenuAction key="valate-auto-translate" kind="channel" />,
-				)
-			} catch {
-				onError()
-				return element
-			}
-		}),
+	patch<MessageSheetProps>(
+		'LongPressMessageActionSheet',
+		messageAction,
+		'valate-translate',
+	)
+	patch<ChannelSheetProps>(
+		'ChannelLongPressActionSheet',
+		channelAction,
+		'valate-auto-translate',
+		true,
 	)
 }
