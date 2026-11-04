@@ -26,8 +26,8 @@ export default function ChannelList({
 		<TableRowGroup
 			description={
 				channels.length
-					? 'New messages and the latest 8 loaded. Open channel only.'
-					: 'Long-press a channel to enable auto-translate.'
+					? 'Translates new messages and the latest 8 loaded messages in the open chat.'
+					: 'Long-press a channel or thread to enable auto-translation.'
 			}
 		>
 			{channels.map(({ id, guildId }) => {

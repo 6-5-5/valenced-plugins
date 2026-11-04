@@ -11,6 +11,7 @@ import type { Channel } from './incoming'
 
 export interface ChannelSheetProps {
 	channel?: Channel
+	thread?: Channel
 	channelId?: string
 	onClose?: () => void
 }
@@ -57,6 +58,7 @@ export function createChannelAction(
 		try {
 			const { ActionSheetRow } = Design
 			const channel =
+				props.thread ??
 				props.channel ??
 				(props.channelId ? getChannel(props.channelId) : undefined)
 			if (
@@ -69,7 +71,7 @@ export function createChannelAction(
 			)
 			return (
 				<ActionSheetRow
-					label={enabled ? 'Disable auto-translate' : 'Enable auto-translate'}
+					label={enabled ? 'Disable Auto-Translate' : 'Enable Auto-Translate'}
 					icon={<ActionSheetRow.Icon source={TranslateIconSource} />}
 					onPress={async () => {
 						if (!active) return

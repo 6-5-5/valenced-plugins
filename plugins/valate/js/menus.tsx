@@ -1,7 +1,8 @@
+import { ActionSheetActionCreators } from '@valenced/discord/actions'
 import { Design } from '@valenced/discord/design'
 import { getModules } from '@valenced/modules/finders'
 import { withName } from '@valenced/modules/finders/filters'
-import { instead } from '@valenced/patcher'
+import { before, instead } from '@valenced/patcher'
 import { lookupGeneratedIconComponent } from '@valenced/utils/discord'
 import { cloneElement, isValidElement } from 'react'
 import { createMessageAction } from './actionsheet'
@@ -144,8 +145,10 @@ export function patchMenus(
 		makeAction: (props: P) => ReactElement | null,
 		key: string,
 		inner = false,
+		lazy = false,
 	) {
 		const renders = new WeakMap<Sheet<P>, Sheet<P>>()
+		const patched = new WeakSet<object>()
 		function edit(tree: ReactNode, props: P) {
 			if (!active) return tree
 			try {
@@ -167,6 +170,10 @@ export function patchMenus(
 		function renderMenu(this: unknown, args: [P], original: Sheet<P>) {
 			const tree = original.apply(this, args)
 			if (!active) return tree
+			if (lazy) {
+				const edited = edit(tree, args[0])
+				if (edited !== tree) return edited
+			}
 			if (!inner || !isValidElement(tree) || typeof tree.type !== 'function')
 				return edit(tree, args[0])
 			try {
@@ -182,22 +189,50 @@ export function patchMenus(
 					render = target.render
 					renders.set(Inner, render)
 				}
-				return { ...tree, type: render }
+				return {
+					...tree,
+					type: render,
+					props: lazy ? { ...args[0], ...(tree.props as P) } : tree.props,
+				}
 			} catch {
 				onError()
 				return tree
 			}
 		}
-		cleanup(
-			getModules(
-				withName<Sheet<P>>(name),
-				exports => {
-					const module = exports as { default: Sheet<P> }
-					cleanup(instead(module, 'default', renderMenu))
-				},
-				{ returnNamespace: true },
-			),
-		)
+		function patchSheet(exports: unknown) {
+			if (!active) return
+			const module = exports as {
+				default: Sheet<P> | { type: Sheet<P> }
+			}
+			const target =
+				typeof module.default === 'function' ? module : module.default
+			if (patched.has(target)) return
+			if (typeof module.default === 'function')
+				cleanup(instead(module as { default: Sheet<P> }, 'default', renderMenu))
+			else cleanup(instead(module.default, 'type', renderMenu))
+			patched.add(target)
+		}
+		if (lazy) {
+			cleanup(
+				before(ActionSheetActionCreators, 'openLazy', args => {
+					if (args[1] !== name) return args
+					args[0] = args[0].then(module => {
+						try {
+							patchSheet(module)
+						} catch {
+							onError()
+						}
+						return module
+					})
+					return args
+				}),
+			)
+		} else
+			cleanup(
+				getModules(withName<Sheet<P>>(name), patchSheet, {
+					returnNamespace: true,
+				}),
+			)
 	}
 	patch<MessageSheetProps>(
 		'LongPressMessageActionSheet',
@@ -210,4 +245,15 @@ export function patchMenus(
 		'valate-auto-translate',
 		true,
 	)
+	for (const name of [
+		'ThreadLongPressActionSheet',
+		'ForumPostLongPressActionSheet',
+	])
+		patch<ChannelSheetProps>(
+			name,
+			channelAction,
+			'valate-auto-translate',
+			true,
+			true,
+		)
 }

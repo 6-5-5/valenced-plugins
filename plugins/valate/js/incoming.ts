@@ -239,5 +239,10 @@ export function watchIncoming(
 		if (typeof event.channel?.id === 'string')
 			void removeChannels(channel => channel.id === event.channel.id)
 	})
+	subscribe('THREAD_DELETE', event => {
+		const thread = event.thread ?? event.channel ?? event
+		if (typeof thread.id === 'string')
+			void removeChannels(channel => channel.id === thread.id)
+	})
 	return (id: string) => channels?.getChannel?.(id)
 }

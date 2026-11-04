@@ -7,7 +7,7 @@ Plugins for [Valenced](https://valenced.app).
 Translate Discord messages without leaving chat.
 
 - Long-press a message to translate it.
-- Long-press a channel to enable auto-translation while it is open. Auto-translation is off by default.
+- Long-press a channel, thread, or forum post to enable auto-translation for that chat. It runs only while open and is off by default.
 - Choose your target and understood languages in Valate settings.
 - Auto-translation detects languages locally and skips uncertain messages. Use manual translation for text it cannot identify.
 - DeepL Free is selected by default and needs no key. Google Translate also works without a key.
