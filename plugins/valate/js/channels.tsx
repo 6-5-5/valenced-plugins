@@ -3,8 +3,8 @@ import {
 	ToastActionCreators,
 } from '@valenced/discord/actions'
 import { Design } from '@valenced/discord/design'
+import { lookupGeneratedIconComponent } from '@valenced/utils/discord'
 import { Defaults } from './config'
-import { TranslateIconSource } from './icon'
 import type { JsonStorage } from '@valenced/json-storage'
 import type { Settings } from './config'
 import type { Channel } from './incoming'
@@ -72,7 +72,11 @@ export function createChannelAction(
 			return (
 				<ActionSheetRow
 					label={enabled ? 'Disable Auto-Translate' : 'Enable Auto-Translate'}
-					icon={<ActionSheetRow.Icon source={TranslateIconSource} />}
+					icon={
+						<ActionSheetRow.Icon
+							IconComponent={lookupGeneratedIconComponent('LanguageIcon')}
+						/>
+					}
 					onPress={async () => {
 						if (!active) return
 						if (props.onClose) props.onClose()

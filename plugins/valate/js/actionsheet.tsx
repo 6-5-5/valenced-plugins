@@ -3,8 +3,8 @@ import {
 	ToastActionCreators,
 } from '@valenced/discord/actions'
 import { Design } from '@valenced/discord/design'
+import { lookupGeneratedIconComponent } from '@valenced/utils/discord'
 import { Defaults, enabledProviders } from './config'
-import { TranslateIconSource } from './icon'
 import TranslationSheet, { SheetKey } from './sheet'
 import type { JsonStorage } from '@valenced/json-storage'
 import type { Settings } from './config'
@@ -41,7 +41,11 @@ export function createMessageAction(
 			return (
 				<ActionSheetRow
 					key="valate-translate"
-					icon={<ActionSheetRow.Icon source={TranslateIconSource} />}
+					icon={
+						<ActionSheetRow.Icon
+							IconComponent={lookupGeneratedIconComponent('LanguageIcon')}
+						/>
+					}
 					label={translated ? 'Revert translation' : 'Translate'}
 					onPress={async () => {
 						if (!active) return
