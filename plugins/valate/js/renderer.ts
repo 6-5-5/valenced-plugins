@@ -120,7 +120,7 @@ interface RowManager {
 	generate(args: Args): Row
 }
 
-export function renderMessage(
+function renderMessage(
 	display: Display,
 	args: Args,
 	original: (args: Args) => Row,

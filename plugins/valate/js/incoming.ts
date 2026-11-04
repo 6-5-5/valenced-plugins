@@ -1,9 +1,9 @@
-import { ToastActionCreators } from '@valenced/discord/actions'
 import { Dispatcher } from '@valenced/discord/common/flux'
 import { getStore } from '@valenced/discord/flux'
 import { AppState } from 'react-native'
 import { createAutoTranslate } from './auto'
 import { Defaults } from './config'
+import { watchChannelRemoval } from './incoming/channels'
 import type { JsonStorage } from '@valenced/json-storage'
 import type { IncomingMessage } from './auto'
 import type { Settings } from './config'
@@ -177,24 +177,6 @@ export function watchIncoming(
 		Dispatcher.subscribe(type, callback)
 		cleanup(() => Dispatcher.unsubscribe(type, callback))
 	}
-	async function removeChannels(
-		matches: (
-			channel: NonNullable<Settings['autoChannels']>[number],
-		) => boolean,
-	) {
-		const current = settings().autoChannels ?? []
-		const remaining = current.filter(channel => !matches(channel))
-		if (current.length === remaining.length) return
-		auto.reset()
-		try {
-			await storage.set({ autoChannels: remaining })
-		} catch {
-			ToastActionCreators.open('valate-auto-translate-error', {
-				text: 'Could not remove auto-translate channels.',
-				variant: 'critical',
-			})
-		}
-	}
 	subscribe('MESSAGE_CREATE', event => {
 		if (!event.optimistic && !event.isPush && event.message)
 			auto.receive(event.message as IncomingMessage)
@@ -213,36 +195,7 @@ export function watchIncoming(
 	})
 	subscribe('CHANNEL_SELECT', reset)
 	subscribe('CONNECTION_CLOSED', auto.reset)
-	subscribe('CONNECTION_OPEN', event => {
-		auto.reset()
-		if (
-			!Array.isArray(event.guilds) ||
-			event.guilds.some(guild => typeof guild?.id !== 'string')
-		)
-			return
-		const guildIds = new Set(event.guilds.map(guild => guild.id))
-		void removeChannels(
-			channel => !!channel.guildId && !guildIds.has(channel.guildId),
-		)
-	})
 	subscribe('LOGOUT', auto.reset)
-	subscribe('GUILD_DELETE', event => {
-		const guild = event.guild ?? event
-		if (
-			typeof guild.id === 'string' &&
-			!guild.unavailable &&
-			!event.unavailable
-		)
-			void removeChannels(channel => channel.guildId === guild.id)
-	})
-	subscribe('CHANNEL_DELETE', event => {
-		if (typeof event.channel?.id === 'string')
-			void removeChannels(channel => channel.id === event.channel.id)
-	})
-	subscribe('THREAD_DELETE', event => {
-		const thread = event.thread ?? event.channel ?? event
-		if (typeof thread.id === 'string')
-			void removeChannels(channel => channel.id === thread.id)
-	})
+	watchChannelRemoval(storage, auto.reset, subscribe)
 	return (id: string) => channels?.getChannel?.(id)
 }

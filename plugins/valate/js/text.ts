@@ -37,16 +37,16 @@ export function protect(text: string) {
 				: part.text.replace(Protected, token),
 		)
 		.join('')
+	const tokensPattern = new RegExp(`⟦${prefix}\\d+⟧`, 'g')
 	return {
 		masked,
-		hasText:
-			masked.replace(new RegExp(`⟦${prefix}\\d+⟧`, 'g'), '').trim().length > 0,
+		hasText: masked.replace(tokensPattern, '').trim().length > 0,
 		restore(translated: string) {
 			if (translated.includes('||'))
 				throw new Error(
 					'The provider changed spoiler formatting. Try another provider.',
 				)
-			const tokens = translated.match(new RegExp(`⟦${prefix}\\d+⟧`, 'g')) ?? []
+			const tokens = translated.match(tokensPattern) ?? []
 			if (
 				tokens.length !== parts.length ||
 				tokens.some((token, i) => token !== parts[i].token)
