@@ -122,10 +122,18 @@ function Spoiler({ text }: { text: string }) {
 	)
 }
 
-function SpoilerText({ text }: { text: string }) {
+function SpoilerText({
+	text,
+	lineClamp,
+	onPress,
+}: {
+	text: string
+	lineClamp?: number
+	onPress?: () => void
+}) {
 	const { Text } = Design
 	return (
-		<Text variant="text-md/normal" selectable>
+		<Text variant="text-md/normal" lineClamp={lineClamp} onPress={onPress}>
 			{splitSpoilers(text).map((part, index) =>
 				part.spoiler ? (
 					<Spoiler key={`${index}:${part.text}`} text={part.text} />
@@ -138,7 +146,8 @@ function SpoilerText({ text }: { text: string }) {
 }
 
 export default function TranslationSheet({ text, storage, service }: Props) {
-	const { ActionSheet, BottomSheetTitleHeader, Button, Stack, Text } = Design
+	const { ActionSheet, BottomSheetTitleHeader, Button, Card, Stack, Text } =
+		Design
 	const settings = storage.use() ?? Defaults
 	const [{ provider, target }, setSelection] = useState({
 		provider: enabledProviders(settings)[0] ?? settings.provider,
@@ -148,6 +157,7 @@ export default function TranslationSheet({ text, storage, service }: Props) {
 	const [error, setError] = useState('')
 	const [attempt, setAttempt] = useState(0)
 	const [busy, setBusy] = useState(true)
+	const [expanded, setExpanded] = useState(false)
 	const controller = useRef<AbortController | null>(null)
 	useEffect(() => {
 		const request = new AbortController()
@@ -212,7 +222,13 @@ export default function TranslationSheet({ text, storage, service }: Props) {
 				<Text variant="text-sm/normal" color="text-muted">
 					Original
 				</Text>
-				<SpoilerText text={text} />
+				<Card variant="secondary" style={{ padding: 12 }}>
+					<SpoilerText
+						text={text}
+						lineClamp={expanded ? undefined : 3}
+						onPress={() => setExpanded(e => !e)}
+					/>
+				</Card>
 				<Text variant="text-sm/normal" color="text-muted">
 					{result
 						? `Translation [${ProviderNames[result.provider]}]`
