@@ -5,6 +5,7 @@ import {
 import { Design } from '@valenced/discord/design'
 import { Clipboard } from '@valenced/externals/react-native-clipboard'
 import { useEffect, useRef, useState } from 'react'
+import { ScrollView } from 'react-native'
 import {
 	Defaults,
 	enabledProviders,
@@ -54,7 +55,6 @@ function TranslationOptionsSheet({
 	const close = () => ActionSheetActionCreators.hideActionSheet(OptionsSheetKey)
 	return (
 		<ActionSheet
-			scrollable
 			startExpanded
 			keyboardShouldPersistTaps="handled"
 			header={
@@ -66,43 +66,48 @@ function TranslationOptionsSheet({
 				/>
 			}
 		>
-			<Stack spacing={16} style={{ paddingBottom: 24 }}>
-				<TextInput
-					label="Target language code"
-					placeholder="en, es or pt-BR"
-					value={draftTarget}
-					onChange={value => {
-						setDraftTarget(value)
-						setError('')
-					}}
-					maxLength={32}
-					status={error ? 'error' : 'default'}
-					errorMessage={error || undefined}
-				/>
-				<TableRadioGroup value={draftProvider} onChange={setDraftProvider}>
-					{enabledProviders(settings).map(value => (
-						<TableRadioRow
-							key={value}
-							label={ProviderNames[value]}
-							value={value}
-						/>
-					))}
-				</TableRadioGroup>
-				<Button
-					text="Translate"
-					disabled={!enabledProviders(settings).includes(draftProvider)}
-					onPress={() => {
-						try {
-							validateTarget(draftTarget.trim())
-						} catch (error) {
-							setError((error as Error).message)
-							return
-						}
-						close()
-						translate(draftTarget.trim(), draftProvider)
-					}}
-				/>
-			</Stack>
+			<ScrollView
+				keyboardShouldPersistTaps="handled"
+				contentContainerStyle={{ paddingBottom: 24 }}
+			>
+				<Stack spacing={16}>
+					<TextInput
+						label="Target language code"
+						placeholder="en, es or pt-BR"
+						value={draftTarget}
+						onChange={value => {
+							setDraftTarget(value)
+							setError('')
+						}}
+						maxLength={32}
+						status={error ? 'error' : 'default'}
+						errorMessage={error || undefined}
+					/>
+					<TableRadioGroup value={draftProvider} onChange={setDraftProvider}>
+						{enabledProviders(settings).map(value => (
+							<TableRadioRow
+								key={value}
+								label={ProviderNames[value]}
+								value={value}
+							/>
+						))}
+					</TableRadioGroup>
+					<Button
+						text="Translate"
+						disabled={!enabledProviders(settings).includes(draftProvider)}
+						onPress={() => {
+							try {
+								validateTarget(draftTarget.trim())
+							} catch (error) {
+								setError((error as Error).message)
+								return
+							}
+							close()
+							translate(draftTarget.trim(), draftProvider)
+						}}
+					/>
+				</Stack>
+			</ScrollView>
 		</ActionSheet>
 	)
 }
@@ -199,7 +204,6 @@ export default function TranslationSheet({ text, storage, service }: Props) {
 	}
 	return (
 		<ActionSheet
-			scrollable
 			startExpanded
 			keyboardShouldPersistTaps="handled"
 			onDismiss={() => controller.current?.abort()}
@@ -218,66 +222,71 @@ export default function TranslationSheet({ text, storage, service }: Props) {
 				/>
 			}
 		>
-			<Stack spacing={16} style={{ paddingBottom: 24 }}>
-				<Text variant="text-sm/normal" color="text-muted">
-					Original
-				</Text>
-				<Card variant="secondary" style={{ padding: 12 }}>
-					<SpoilerText
-						text={text}
-						lineClamp={expanded ? undefined : 3}
-						onPress={() => setExpanded(e => !e)}
-					/>
-				</Card>
-				<Text variant="text-sm/normal" color="text-muted">
-					{result
-						? `Translation [${ProviderNames[result.provider]}]`
-						: 'Translation'}
-					{result?.source
-						? ` · from ${language(result.source.toLowerCase())}`
-						: ''}
-				</Text>
-				<SpoilerText text={busy ? 'Translating…' : (result?.text ?? error)} />
-				{result && (
+			<ScrollView
+				keyboardShouldPersistTaps="handled"
+				contentContainerStyle={{ paddingBottom: 24 }}
+			>
+				<Stack spacing={16}>
+					<Text variant="text-sm/normal" color="text-muted">
+						Original
+					</Text>
+					<Card variant="secondary" style={{ padding: 12 }}>
+						<SpoilerText
+							text={text}
+							lineClamp={expanded ? undefined : 3}
+							onPress={() => setExpanded(e => !e)}
+						/>
+					</Card>
+					<Text variant="text-sm/normal" color="text-muted">
+						{result
+							? `Translation [${ProviderNames[result.provider]}]`
+							: 'Translation'}
+						{result?.source
+							? ` · from ${language(result.source.toLowerCase())}`
+							: ''}
+					</Text>
+					<SpoilerText text={busy ? 'Translating…' : (result?.text ?? error)} />
+					{result && (
+						<Button
+							text="Copy translation"
+							onPress={() => {
+								Clipboard.setString(result.text)
+								ToastActionCreators.open('valate-copied', {
+									text: 'Translation copied',
+									variant: 'success',
+								})
+							}}
+						/>
+					)}
+					{!busy && (
+						<Button
+							text="Retry translation"
+							variant="secondary"
+							onPress={() => setAttempt(attempt + 1)}
+						/>
+					)}
 					<Button
-						text="Copy translation"
+						text="Change language or provider"
+						variant="tertiary"
 						onPress={() => {
-							Clipboard.setString(result.text)
-							ToastActionCreators.open('valate-copied', {
-								text: 'Translation copied',
-								variant: 'success',
-							})
+							ActionSheetActionCreators.openLazy(
+								Promise.resolve({ default: TranslationOptionsSheet }),
+								OptionsSheetKey,
+								{
+									storage,
+									target,
+									provider,
+									translate(target, provider) {
+										setSelection({ target, provider })
+										setAttempt(attempt => attempt + 1)
+									},
+								},
+								'stack',
+							)
 						}}
 					/>
-				)}
-				{!busy && (
-					<Button
-						text="Retry translation"
-						variant="secondary"
-						onPress={() => setAttempt(attempt + 1)}
-					/>
-				)}
-				<Button
-					text="Change language or provider"
-					variant="tertiary"
-					onPress={() => {
-						ActionSheetActionCreators.openLazy(
-							Promise.resolve({ default: TranslationOptionsSheet }),
-							OptionsSheetKey,
-							{
-								storage,
-								target,
-								provider,
-								translate(target, provider) {
-									setSelection({ target, provider })
-									setAttempt(attempt => attempt + 1)
-								},
-							},
-							'stack',
-						)
-					}}
-				/>
-			</Stack>
+				</Stack>
+			</ScrollView>
 		</ActionSheet>
 	)
 }
